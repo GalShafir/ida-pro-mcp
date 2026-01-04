@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+.github
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+.eggs
+dist
+build
+*.egg
+
+# Virtual environments
+.venv
+venv
+ENV
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Documentation
+*.md
+!README.md
+devdocs
+
+# Tests
+tests
+
+# CI/CD
+Jenkinsfile
+Dockerfile
+.dockerignore
+
+# Misc
+.editorconfig
+.python-version
+uv.lock
+uv-package.sh
+ida-plugin.json
