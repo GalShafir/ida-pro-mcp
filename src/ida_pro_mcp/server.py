@@ -883,8 +883,9 @@ def main():
             if url.hostname is None or url.port is None:
                 raise Exception(f"Invalid transport URL: {args.transport}")
             # NOTE: npx -y @modelcontextprotocol/inspector for debugging
-            mcp.serve(url.hostname, url.port)
-            input("Server is running, press Enter or Ctrl+C to stop.")
+            # Run in foreground mode (background=False) to block and keep process alive
+            # This is required for running in containers without TTY
+            mcp.serve(url.hostname, url.port, background=False)
     except (KeyboardInterrupt, EOFError):
         pass
 
