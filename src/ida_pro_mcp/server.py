@@ -884,7 +884,8 @@ def main():
                 raise Exception(f"Invalid transport URL: {args.transport}")
             # NOTE: npx -y @modelcontextprotocol/inspector for debugging
             mcp.serve(url.hostname, url.port)
-            input("Server is running, press Enter or Ctrl+C to stop.")    except (KeyboardInterrupt, EOFError):
+            input("Server is running, press Enter or Ctrl+C to stop.")
+    except (KeyboardInterrupt, EOFError):
         pass
 
 
