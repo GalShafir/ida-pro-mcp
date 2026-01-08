@@ -1,65 +1,129 @@
+// IDA Pro MCP - Jenkins Pipeline
+// Builds and publishes the Python package to Artifactory
+
 pipeline {
-    agent any
+    agent {
+        label 'python'
+    }
 
     environment {
-        // Docker registry configuration - customize for your environment
-        DOCKER_REGISTRY = 'your-registry.example.com'
-        IMAGE_NAME = 'ida-pro-mcp'
+        // Artifactory configuration
+        ARTIFACTORY_URL = credentials('artifactory-url')
+        ARTIFACTORY_PYPI_REPO = 'pypi-local'
+        ARTIFACTORY_CREDS = credentials('artifactory-credentials')
         
-        // Use git commit SHA for unique tagging
-        GIT_COMMIT_SHORT = "${GIT_COMMIT.take(7)}"
-        IMAGE_TAG = "${GIT_COMMIT_SHORT}"
-        
-        // Docker credentials ID configured in Jenkins
-        DOCKER_CREDENTIALS_ID = 'docker-registry-credentials'
+        // Package info
+        PACKAGE_NAME = 'ida-pro-mcp'
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+        disableConcurrentBuilds()
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
                 script {
-                    docker.build("${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}")
+                    // Get version from pyproject.toml
+                    env.PACKAGE_VERSION = sh(
+                        script: "grep '^version = ' pyproject.toml | cut -d'\"' -f2",
+                        returnStdout: true
+                    ).trim()
+                    
+                    // Get Git commit SHA for build metadata
+                    env.GIT_COMMIT_SHORT = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+                    
+                    echo "Building ${PACKAGE_NAME} version ${PACKAGE_VERSION} (${GIT_COMMIT_SHORT})"
                 }
             }
         }
 
-        stage('Tag Latest') {
+        stage('Setup Python Environment') {
             steps {
-                script {
-                    sh "docker tag ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest"
-                }
+                sh '''
+                    python3 -m venv .venv
+                    . .venv/bin/activate
+                    pip install --upgrade pip
+                    pip install build twine
+                '''
             }
         }
 
-        stage('Push to Registry') {
+        stage('Build Package') {
             steps {
-                script {
-                    docker.withRegistry("https://${DOCKER_REGISTRY}", DOCKER_CREDENTIALS_ID) {
-                        docker.image("${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}").push()
-                        docker.image("${DOCKER_REGISTRY}/${IMAGE_NAME}:latest").push()
-                    }
+                sh '''
+                    . .venv/bin/activate
+                    
+                    # Clean previous builds
+                    rm -rf dist/ build/ *.egg-info
+                    
+                    # Build the package (creates .whl and .tar.gz)
+                    python -m build
+                    
+                    # List built artifacts
+                    echo "Built packages:"
+                    ls -la dist/
+                '''
+            }
+        }
+
+        stage('Validate Package') {
+            steps {
+                sh '''
+                    . .venv/bin/activate
+                    
+                    # Check package with twine
+                    twine check dist/*
+                    
+                    # Test install the package
+                    pip install dist/*.whl
+                    
+                    # Verify it installed correctly
+                    pip show ida-pro-mcp
+                '''
+            }
+        }
+
+        stage('Publish to Artifactory') {
+            when {
+                anyOf {
+                    branch 'main'
+                    buildingTag()
                 }
+            }
+            steps {
+                sh '''
+                    . .venv/bin/activate
+                    
+                    # Configure pip to use Artifactory
+                    twine upload \
+                        --repository-url ${ARTIFACTORY_URL}/api/pypi/${ARTIFACTORY_PYPI_REPO} \
+                        --username ${ARTIFACTORY_CREDS_USR} \
+                        --password ${ARTIFACTORY_CREDS_PSW} \
+                        dist/*
+                    
+                    echo "Published ${PACKAGE_NAME} ${PACKAGE_VERSION} to Artifactory"
+                '''
             }
         }
     }
 
     post {
-        always {
-            // Clean up local Docker images
-            sh "docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} || true"
-            sh "docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest || true"
-        }
         success {
-            echo "Successfully built and pushed ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+            echo "Build successful: ${PACKAGE_NAME} ${PACKAGE_VERSION}"
+            archiveArtifacts artifacts: 'dist/*', fingerprint: true
         }
         failure {
-            echo "Build or push failed"
+            echo "Build failed"
+        }
+        always {
+            cleanWs()
         }
     }
 }
